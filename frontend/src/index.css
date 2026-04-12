@@ -1,0 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  background-color: #1a1a1a;
+  color: #aaaaaa;
+}
+
+.font-serif-claude {
+  font-family: Georgia, 'Instrument Serif', serif;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent; 
+}
+::-webkit-scrollbar-thumb {
+  background: #3a3a3a; 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555555; 
+}
+
+/* Custom placeholder color */
+::placeholder {
+  color: #666666 !important;
+  opacity: 1; /* Firefox */
+}
