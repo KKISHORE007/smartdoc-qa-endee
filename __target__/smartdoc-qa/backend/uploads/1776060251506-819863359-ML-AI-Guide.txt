@@ -1,1 +1,0 @@
-Machine Learning (ML) is a subset of Artificial Intelligence (AI) that allows systems to learn from data. Key concepts include supervised learning, unsupervised learning, and reinforcement learning. Neural networks form the backbone of deep learning, enabling breakthroughs in image recognition, NLP, and autonomous systems.
