@@ -214,8 +214,11 @@ struct PersistenceConfig {
 };
 
 #include "../storage/backup_store.hpp"
+#include "rebuild.hpp"
+#include "utils/types.hpp"
 
 class IndexManager {
+    friend class Rebuild;  // executeJob accesses saveIndexInternal + metadata_manager_
 private:
     std::deque<std::string> indices_list_;
     std::unordered_map<std::string, std::shared_ptr<CacheEntry>> indices_;
@@ -237,8 +240,8 @@ private:
     std::thread autosave_thread_;
     std::atomic<bool> running_{true};
     BackupStore backup_store_;
-    void executeBackupJob(const std::string& index_id, const std::string& backup_name,
-                          std::stop_token st);
+    Rebuild rebuild_;
+    void executeBackupJob(const std::string& index_id, const std::string& backup_name, std::stop_token st);
 
     std::unique_ptr<WriteAheadLog> createWAL(const std::string& index_id) {
         const std::string wal_dir = data_dir_ + "/" + index_id;
@@ -598,6 +601,7 @@ public:
         backup_store_(data_dir) {
         std::filesystem::create_directories(data_dir);
         metadata_manager_ = std::make_unique<MetadataManager>(data_dir);
+        rebuild_.cleanupTempFiles(data_dir);
         // Start the autosave thread
         autosave_thread_ = std::thread(&IndexManager::autosaveLoop, this);
     }
@@ -606,9 +610,10 @@ public:
         // Signal all threads to stop (running_ is checked by autosave and backup threads)
         running_ = false;
 
-        // Join background backup threads before destroying members
-        // (prevents use-after-free when detached threads outlive IndexManager)
+        // Join background backup and rebuild threads before destroying members
+        // (prevents use-after-free when threads outlive IndexManager)
         backup_store_.joinAllThreads();
+        rebuild_.joinAllThreads();
 
         /**
          * Don't wait for autosave thread to exit.
@@ -1125,47 +1130,15 @@ public:
             logInsertsAndUpdates(entry, numeric_ids);
 
             // Add to HNSW index in parallel using pre-quantized data from QuantVectorObject
-            size_t available_threads = settings::NUM_PARALLEL_INSERTS;
-            const size_t num_threads = (available_threads < quantized_vectors.size())
-                                               ? available_threads
-                                               : quantized_vectors.size();
-            std::vector<std::thread> threads;
-            const size_t chunk_size =
-                    (quantized_vectors.size() + num_threads - 1) / num_threads;  // Ceiling division
-
-            threads.reserve(num_threads);
-            for(size_t t = 0; t < num_threads; t++) {
-                threads.emplace_back([&, t]() {
-                    // Calculate start and end indices for this thread
-                    size_t start_idx = t * chunk_size;
-                    size_t end_idx = (start_idx + chunk_size < quantized_vectors.size())
-                                            ? (start_idx + chunk_size)
-                                            : quantized_vectors.size();
-
-                    // Process assigned chunk of vectors
-                    for(size_t i = start_idx; i < end_idx; i++) {
-                        const auto& quant_vec_obj = quantized_vectors[i];
-
-                        // Use pre-quantized data directly from QuantVectorObject - no conversion
-                        // needed!
-                        const uint8_t* vector_data = quant_vec_obj.quant_vector.data();
-
-                        // Add to HNSW index using pre-quantized raw bytes
-                        if(numeric_ids[i].second) {
-                            // If it's a new ID, add it to the index
-                            entry.alg->addPoint<true>(vector_data, numeric_ids[i].first);
-                        } else {
-                            // If it's an update, add it to the index
-                            entry.alg->addPoint<false>(vector_data, numeric_ids[i].first);
-                        }
+            parallelAddPoints(quantized_vectors.size(), settings::NUM_PARALLEL_INSERTS,
+                [&](size_t i) {
+                    const uint8_t* vector_data = quantized_vectors[i].quant_vector.data();
+                    if(numeric_ids[i].second) {
+                        entry.alg->addPoint<true>(vector_data, numeric_ids[i].first);
+                    } else {
+                        entry.alg->addPoint<false>(vector_data, numeric_ids[i].first);
                     }
                 });
-            }
-
-            // Wait for all threads to complete
-            for(auto& thread : threads) {
-                thread.join();
-            }
 
             entry.markDirty();
 
@@ -1945,6 +1918,74 @@ public:
     void uploadBackup(const std::string& backup_name,
                       const std::string& username,
                       const std::string& file_content);
+
+    // Metadata access
+    std::optional<IndexMetadata> getMetadata(const std::string& index_id) {
+        return metadata_manager_->getMetadata(index_id);
+    }
+
+    // Reads live count from the in-memory HNSW graph; meta->total_elements can be stale between saves.
+    size_t getElementCount(const std::string& index_id) {
+        auto entry = getIndexEntry(index_id);
+        return entry->alg->getElementsCount();
+    }
+
+
+    // ========== Rebuild operations ==========
+
+    // Return codes:
+    //   0: rebuild started successfully
+    //   1: index not found
+    //   2: rebuild or backup already in progress for this user
+    //   3: no configuration changes specified / invalid parameters
+    ndd::OperationResult<> rebuildIndexAsync(const std::string& index_id,
+                                      size_t new_M,
+                                      size_t new_ef_con);
+
+    bool hasActiveRebuild(const std::string& username) const {
+        return rebuild_.hasActiveRebuild(username);
+    }
+
+    nlohmann::json getRebuildProgress(const std::string& username,
+                                      const std::string& index_id) const {
+        return rebuild_.getProgress(username, index_id);
+    }
+
+    // Shared parallel addPoint utility — static chunk partition (same as addVectors).
+    // ProcessFn signature: void(size_t index)
+    template <typename ProcessFn>
+    static void parallelAddPoints(size_t count, size_t max_threads, ProcessFn&& process) {
+        if (count == 0) return;
+        size_t num_threads = std::min(max_threads, count);
+        const size_t chunk_size = (count + num_threads - 1) / num_threads;
+        std::vector<std::thread> threads;
+        threads.reserve(num_threads);
+        for (size_t t = 0; t < num_threads; ++t) {
+            threads.emplace_back([&, t]() {
+                size_t start_idx = t * chunk_size;
+                size_t end_idx = std::min(start_idx + chunk_size, count);
+                for (size_t i = start_idx; i < end_idx; ++i) {
+                    process(i);
+                }
+            });
+        }
+        for (auto& th : threads) {
+            th.join();
+        }
+    }
+
+    // Wires vector fetchers on an HNSW graph. Must be called before addPoint — searchBaseLayer
+    // during graph construction needs fetchers to compute distances for base-layer-only nodes.
+    static void wireVectorFetchers(hnswlib::HierarchicalNSW<float>* alg,
+                                   std::shared_ptr<VectorStorage> vs) {
+        alg->setVectorFetcher([vs](ndd::idInt label, uint8_t* buffer) {
+            return vs->get_vector(label, buffer);
+        });
+        alg->setVectorFetcherBatch([vs](const ndd::idInt* labels, uint8_t* buffers,
+                                        bool* success, size_t count) -> size_t {
+            return vs->get_vectors_batch_into(labels, buffers, success, count);
+        });
+    }
 };
 
 // ========== IndexManager backup implementations ==========
@@ -2231,6 +2272,7 @@ inline std::string IndexManager::createBackupAsync(const std::string& index_id,
     return backup_name;
 }
 
+
 inline void IndexManager::uploadBackup(const std::string& backup_name, const std::string& username, const std::string& file_content) {
     std::string user_backup_dir = backup_store_.getUserBackupDir(username);
     std::filesystem::create_directories(user_backup_dir);
@@ -2288,4 +2330,67 @@ inline void IndexManager::uploadBackup(const std::string& backup_name, const std
     nlohmann::json backup_db = backup_store_.readBackupJson(username);
     backup_db[backup_name] = backup_json;
     backup_store_.writeBackupJson(username, backup_db);
+}
+
+// ========== IndexManager rebuild implementations ==========
+
+inline ndd::OperationResult<> IndexManager::rebuildIndexAsync(const std::string& index_id,
+                                                        size_t new_M,
+                                                        size_t new_ef_con) {
+    auto meta = metadata_manager_->getMetadata(index_id);
+    if (!meta) {
+        return {1, "Index not found"};
+    }
+
+    std::string username;
+    size_t pos = index_id.find('/');
+    if (pos != std::string::npos) {
+        username = index_id.substr(0, pos);
+    } else {
+        return {3, "Invalid index ID format"};
+    }
+
+    if (backup_store_.hasActiveBackup(username)) {
+        return {2, "Backup already in progress for user: " + username};
+    }
+    if (rebuild_.hasActiveRebuild(username)) {
+        return {2, "Rebuild already in progress for user: " + username};
+    }
+
+    // Pre-fetch entry now — captured by lambdas so the thread never calls getIndexEntry
+    auto entry = getIndexEntry(index_id);
+    size_t current_count = entry->alg->getElementsCount();
+
+    if (new_M == meta->M && new_ef_con == meta->ef_con) {
+        return {3, "No configuration changes specified"};
+    }
+
+    std::string base_path = data_dir_ + "/" + index_id;
+    std::string vector_storage_dir = base_path + "/vectors";
+
+    RebuildJobParams params{
+        .username             = username,
+        .new_M                = new_M,
+        .new_ef_con           = new_ef_con,
+        .entry                = entry,
+        .manager              = this,
+        .temp_path            = Rebuild::getTempPath(base_path),
+        .timestamped_path     = Rebuild::getTimestampedPath(base_path),
+        .index_path           = vector_storage_dir + "/" + settings::DEFAULT_SUBINDEX + ".idx",
+        .num_parallel_inserts = settings::NUM_PARALLEL_INSERTS,
+    };
+
+    // Register state FIRST with empty thread — hasActiveRebuild() returns true immediately
+    rebuild_.setActiveRebuild(username, index_id, current_count);
+
+    // Spawn thread — lambda calls rebuild_.executeJob directly (execution lives in Rebuild)
+    std::jthread t([this, params = std::move(params)](std::stop_token st) {
+        rebuild_.executeJob(params, st);
+    });
+
+    // Move real thread into the already-registered state
+    rebuild_.attachRebuildThread(username, std::move(t));
+
+    LOG_INFO(1800, index_id, "Rebuild started: M=" << new_M << " ef_con=" << new_ef_con);
+    return {0, "Rebuild started"};
 }
