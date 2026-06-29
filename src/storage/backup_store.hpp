@@ -34,6 +34,7 @@
 #include "index_meta.hpp"
 #include "settings.hpp"
 #include "log.hpp"
+#include "../utils/errors.hpp"
 
 struct ActiveBackup {
     std::string index_id;
@@ -252,26 +253,22 @@ public:
 
     // Backup name validation
 
-    std::pair<bool, std::string> validateBackupName(const std::string& backup_name) const {
+    void validateBackupName(const std::string& backup_name) const {
         if(backup_name.empty()) {
-            return std::make_pair(false, "Backup name cannot be empty");
+            throw ndd::ApiError(400, "Backup name cannot be empty");
         }
 
         if(backup_name.length() > settings::MAX_BACKUP_NAME_LENGTH) {
-            return std::make_pair(false,
-                                  "Backup name too long (max "
-                                          + std::to_string(settings::MAX_BACKUP_NAME_LENGTH)
-                                          + " characters)");
+            throw ndd::ApiError(400, "Backup name too long (max "
+                                     + std::to_string(settings::MAX_BACKUP_NAME_LENGTH)
+                                     + " characters)");
         }
 
         static const std::regex backup_name_regex("^[a-zA-Z0-9_-]+$");
         if(!std::regex_match(backup_name, backup_name_regex)) {
-            return std::make_pair(false,
-                                  "Invalid backup name: only alphanumeric, underscores, "
-                                  "and hyphens allowed");
+            throw ndd::ApiError(400, "Invalid backup name: only alphanumeric, underscores, "
+                                     "and hyphens allowed");
         }
-
-        return std::make_pair(true, "");
     }
 
     // Backup listing
@@ -283,12 +280,9 @@ public:
 
     // Backup deletion
 
-    std::pair<bool, std::string> deleteBackup(const std::string& backup_name,
-                                               const std::string& username) {
-        std::pair<bool, std::string> result = validateBackupName(backup_name);
-        if(!result.first) {
-            return result;
-        }
+    void deleteBackup(const std::string& backup_name,
+                      const std::string& username) {
+        validateBackupName(backup_name);
 
         std::string backup_tar = getUserBackupDir(username) + "/" + backup_name + ".tar";
 
@@ -300,9 +294,8 @@ public:
             writeBackupJson(username, backup_db);
 
             LOG_INFO(1303, username, "Deleted backup " << backup_tar);
-            return {true, ""};
         } else {
-            return {false, "Backup not found"};
+            throw ndd::ApiError(404, "Backup not found");
         }
     }
 
