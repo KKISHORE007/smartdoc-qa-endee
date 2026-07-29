@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-    <b>High-performance open-source vector database for AI search, RAG, semantic search, and hybrid retrieval.</b>
+    <b>High-performance AI Search & Intelligence platform for AI search, RAG, semantic search, and hybrid retrieval.</b>
 </p>
 
 <p align="center">
@@ -24,9 +24,9 @@
 <strong><a href="./docs/getting-started.md">Quick Start</a> • <a href="#why-endee">Why Endee</a> • <a href="#use-cases">Use Cases</a> • <a href="#features">Features</a> • <a href="#api-and-clients">API and Clients</a> • <a href="#docs-and-links">Docs</a> • <a href="#community-and-contact">Contact</a></strong>
 </p>
 
-# Endee: Open-Source Vector Database for AI Search
+# Endee: AI Search & Intelligence Platform
 
-**Endee** is a high-performance open-source vector database built for AI search and retrieval workloads. It is designed for teams building **RAG pipelines**, **semantic search**, **hybrid search**, recommendation systems, and filtered vector retrieval APIs that need production-oriented performance and control.
+**Endee** is a high-performance AI Search & Intelligence platform built for AI search and retrieval workloads. It is designed for teams building **RAG pipelines**, **semantic search**, **hybrid search**, recommendation systems, and filtered vector retrieval APIs that need production-oriented performance and control.
 
 Endee combines vector search with filtering, sparse retrieval support, backup workflows, and deployment flexibility across local builds and Docker-based environments. The project is implemented in C++ and optimized for modern CPU targets, including AVX2, AVX512, NEON, and SVE2.
 
@@ -34,7 +34,7 @@ If you want the fastest path to evaluate Endee locally, start with the [Getting 
 
 ## Why Endee
 
-- Built as a dedicated vector database for AI applications, search systems, and retrieval-heavy workloads.
+- Built as a dedicated AI search and intelligence platform for AI applications, search systems, and retrieval-heavy workloads.
 - Supports dense vector retrieval plus sparse search capabilities for hybrid search use cases.
 - Includes payload filtering for metadata-aware retrieval and application-specific query logic.
 - Ships with operational features already documented in this repo, including backup flows and runtime observability.
@@ -138,4 +138,4 @@ If you offer a hosted or managed service based on this software, you must use yo
 
 ## Third-Party Software
 
-This project includes or depends on third-party software components licensed under their respective open-source licenses. Use of those components is governed by their own license terms.
+This project includes or depends on third-party software components licensed under their respective licenses. Use of those components is governed by their own license terms.

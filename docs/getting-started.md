@@ -1,6 +1,6 @@
-# Endee: High-Performance Open Source Vector Database
+# Endee: AI Search & Intelligence Platform
 
-**Endee** is a specialized, high-performance vector database built for speed and efficiency — engineered for production AI systems that need to process data at scale.
+**Endee** is a specialized, high-performance AI Search & Intelligence platform built for speed and efficiency — engineered for production AI systems that need to process data at scale.
 
 Never heard of a vector database? No worries — check out our blog where we explain what it is and what you can build with it: [endee.io/blog](https://endee.io/blog)
 

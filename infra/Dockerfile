@@ -88,7 +88,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8080/api/v1/health || exit 1
 
 LABEL org.opencontainers.image.title="endee-oss"
-LABEL org.opencontainers.image.description="Endee Open Source"
+LABEL org.opencontainers.image.description="Endee — AI Search & Intelligence Platform"
 LABEL org.opencontainers.image.url="https://endee.io/"
 LABEL org.opencontainers.image.documentation="https://docs.endee.io/"
 LABEL org.opencontainers.image.vendor="Endee Labs"
